@@ -12,9 +12,11 @@ import configparser
 VERSION = 'v0.0'
 DATE = '2018.03.09'
 RE_MSG = '682E0001030000372310D21D81008007E2030602082E19003C07E2030602082E1A000007E2030602082E1A0000801E16'
-CONFIG_FILE = './698FrontEnd.ini'
-LOG_FILE = './698FrontEnd.log'
+SOFTWARE_PATH = os.path.split(os.path.realpath(__file__))[0]
+CONFIG_FILE = os.path.join(SOFTWARE_PATH, '698FrontEnd.ini')
+LOG_FILE = os.path.join(SOFTWARE_PATH, '698FrontEnd.log')
 CLIENT_HANDLE_LIST = []
+print(os.getcwd())
 
 def msg_byte2str(byte, sep=''):
     """byte to str"""
@@ -26,11 +28,32 @@ def msg_str2byte(hex_str):
     return b''.join([struct.pack('B', x) for x in hex_list])
 
 
+class LoggerClass():
+    """logger"""
+    def __init__(self, log_name):
+        self.logger = logging.getLogger(log_name)
+        formatter = logging.Formatter('[%(asctime)s] %(message)s')
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        file_handler = logging.FileHandler(LOG_FILE)
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+        self.logger.addHandler(file_handler)
+        self.logger.setLevel(logging.INFO)
+
+    def info(self, *msg):
+        """log info"""
+        self.logger.info(*msg)
+
+LOG = LoggerClass('server')
+
+
 class Config():
     """server config"""
     def __init__(self):
         self.config = configparser.ConfigParser()
         if not os.path.isfile(CONFIG_FILE):
+            LOG.info('config file not found, create new.')
             with open(CONFIG_FILE, 'w') as _: pass
         self.config['TerminalTcpServer'] = {}
         self.config.read(CONFIG_FILE)
@@ -61,26 +84,6 @@ class Config():
         return int(self.config['TerminalTcpServer']['timeout_sec'])
 
 CONFIG = Config()
-
-
-class LoggerClass():
-    """logger"""
-    def __init__(self, log_name):
-        self.logger = logging.getLogger(log_name)
-        formatter = logging.Formatter('[%(asctime)s] %(message)s')
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        file_handler = logging.FileHandler("698FrontEnd.log")
-        file_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
-        self.logger.addHandler(file_handler)
-        self.logger.setLevel(logging.INFO)
-
-    def info(self, *msg):
-        """log info"""
-        self.logger.info(*msg)
-
-LOG = LoggerClass('server')
 
 
 class ClientHandler(asyncore.dispatcher_with_send):
