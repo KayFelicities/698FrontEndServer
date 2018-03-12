@@ -91,6 +91,8 @@ class ClientHandler(asyncore.dispatcher_with_send):
     def __init__(self, *args, **kw):
         asyncore.dispatcher_with_send.__init__(self, *args, **kw)
         self.last_active_tm = time.time()
+        if self not in CLIENT_HANDLE_LIST:
+            CLIENT_HANDLE_LIST.append(self)
 
     def handle_read(self):
         data = self.recv(8192)
@@ -105,11 +107,15 @@ class ClientHandler(asyncore.dispatcher_with_send):
     def handle_close(self):
         LOG.info('{client} quit'.format(client=str(self.addr)))
         self.close()
+        if self in CLIENT_HANDLE_LIST:
+            CLIENT_HANDLE_LIST.remove(self)
 
     def kill(self):
         """kill"""
         LOG.info('{client} timeout, close it.'.format(client=str(self.addr)))
         self.close()
+        if self in CLIENT_HANDLE_LIST:
+            CLIENT_HANDLE_LIST.remove(self)
 
     def is_alive(self):
         """chk client alive"""
@@ -127,7 +133,7 @@ class TcpServer(asyncore.dispatcher):
 
     def handle_accepted(self, sock, addr):
         LOG.info('{client} connected'.format(client=repr(addr)))
-        CLIENT_HANDLE_LIST.append(ClientHandler(sock))
+        ClientHandler(sock)
 
     def show_status(self):
         """show status"""
@@ -150,7 +156,6 @@ def dead_client_kill():
         for client_handle in CLIENT_HANDLE_LIST:
             if not client_handle.is_alive():
                 client_handle.kill()
-                CLIENT_HANDLE_LIST.remove(client_handle)
 
 
 if __name__ == '__main__':
