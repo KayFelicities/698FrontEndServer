@@ -85,7 +85,9 @@ LOG = LoggerClass('server')
 
 class ClientHandler(asyncore.dispatcher_with_send):
     """client"""
-    last_active_tm = time.time()
+    def __init__(self, *args, **kw):
+        asyncore.dispatcher_with_send.__init__(self, *args, **kw)
+        self.last_active_tm = time.time()
 
     def handle_read(self):
         data = self.recv(8192)
@@ -163,6 +165,9 @@ if __name__ == '__main__':
             .format(bind=CONFIG.get_terminal_bind(), port=CONFIG.get_terminal_port(), timeout=CONFIG.get_terminal_timeout_sec()))
     while True:
         command = input('->')
+        if not command:
+            continue
+
         if command in ['i']:
             tcp_server.show_status()
         elif command in ['t']:
