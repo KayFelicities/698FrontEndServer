@@ -83,25 +83,25 @@ class LoggerClass():
 
     def recv_tmn_link_msg(self, tmn_SA, tmn_addr, msg, link_type='heart'):
         """recv_tmn_link_msg"""
-        self.logger.info('{link_type} from tmn{SA}({t_ip}):{msg}'\
+        self.logger.info('{link_type} from T[{SA}({t_ip})]:{msg}'\
             .format(link_type=link_type, SA=tmn_SA, t_ip=tmn_addr[0], msg=msg))
 
     def send_to_tmn(self, tmn_SA, tmn_addr, msg, from_CA='server', from_addr=('0.0.0.0', 0)):
         """send tmn msg"""
         if from_CA == 'server':
-            self.logger.info('Server -> tmn{SA}({t_ip}):{msg}'\
+            self.logger.info('Server -> T[{SA}({t_ip})]:{msg}'\
                 .format(SA=tmn_SA, t_ip=tmn_addr[0], msg=msg))
         else:
-            self.logger.info('后台{CA}({m_ip}) -> 终端{SA}({t_ip}):{msg}'\
+            self.logger.info('M[{CA}({m_ip})] -> T[{SA}({t_ip})]:{msg}'\
                 .format(CA=from_CA, m_ip=from_addr[0], SA=tmn_SA, t_ip=tmn_addr[0], msg=msg))
 
     def send_to_master(self, master_CA, master_addr, msg, from_SA='server', from_addr=('0.0.0.0', 0)):
         """send tmn msg"""
         if from_SA == 'server':
-            self.logger.info('Server -> master{CA}({m_ip}):{msg}'\
+            self.logger.info('Server -> M[{CA}({m_ip})]:{msg}'\
                 .format(CA=master_CA, m_ip=master_addr[0], msg=msg))
         else:
-            self.logger.info('终端{SA}({t_ip}) -> 后台{CA}({m_ip}):{msg}'\
+            self.logger.info('T[{SA}({t_ip})] -> M[{CA}({m_ip})]:{msg}'\
                 .format(SA=from_SA, t_ip=from_addr[0], CA=master_CA, m_ip=master_addr[0], msg=msg))
 
 LOG = LoggerClass('server')
@@ -270,8 +270,10 @@ class UserTable():
         else:
             return [x.tcp_handle for x in self.tmn_table]
 
-    def add_tmn(self, tcp_handle, ip, port, SA, login_tm=time.time()):
+    def add_tmn(self, tcp_handle, ip, port, SA, login_tm=None):
         """add tmn"""
+        if login_tm is None:
+            login_tm = time.time()
         index = self.__get_tmn_tuple_index(tcp_handle)
         if index >= 0:
             self.tmn_table[index] = self.tmn_table[index]._replace(ip=ip, port=port, SA=SA, login_tm=login_tm)
@@ -322,8 +324,10 @@ class UserTable():
         else:
             return [x.tcp_handle for x in self.master_table]
 
-    def add_master(self, tcp_handle, ip, port, CA, login_tm=time.time()):
+    def add_master(self, tcp_handle, ip, port, CA, login_tm=None):
         """add master"""
+        if login_tm is None:
+            login_tm = time.time()
         index = self.__get_master_tuple_index(tcp_handle)
         if index >= 0:
             self.master_table[index] = self.master_table[index]._replace(ip=ip, port=port, CA=CA, login_tm=login_tm)
@@ -448,10 +452,10 @@ class MasterHandler(asyncore.dispatcher_with_send):
             msg_list = search_msg(msgbyte2str(data))
             for msg in msg_list:
                 msg_chk = MsgChk(msg)
-                self.CA = msg_chk.CA
-                USER_TABLE.set_master_CA(self, msg_chk.CA)
                 send_list = USER_TABLE.get_tmn_handler_list(SA='' if msg_chk.is_broadcast else msg_chk.SA)
                 if send_list:
+                    self.CA = msg_chk.CA
+                    USER_TABLE.set_master_CA(self, msg_chk.CA)
                     for tmn_handle in send_list:
                         tmn_handle.send_msg(msg, self.CA, self.addr)
                 else:
@@ -530,8 +534,10 @@ if __name__ == '__main__':
     collection_thread = threading.Thread(name='collection', target=dead_client_kill)
     tcp_server_thread.start()
     collection_thread.start()
-    LOG.info('tmn TCP server start. bind {bind}, port {port}, timeout {timeout}s'\
+    LOG.info('terminal server bind {bind}, port {port}, timeout {timeout}s'\
             .format(bind=CONFIG.get_tmn_bind(), port=CONFIG.get_tmn_port(), timeout=CONFIG.get_tmn_timeout_sec()))
+    LOG.info('master server bind {bind}, port {port}, timeout {timeout}s'\
+            .format(bind=CONFIG.get_master_bind(), port=CONFIG.get_master_port(), timeout=CONFIG.get_master_timeout_sec()))
     while True:
         command = input('->')
         if not command:
