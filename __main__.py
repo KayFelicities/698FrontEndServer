@@ -31,20 +31,21 @@ def msgstr2byte(hex_str):
     hex_list = list(bytearray.fromhex(hex_str.replace(' ', '').strip()))
     return b''.join([struct.pack('B', x) for x in hex_list])
 
-def msgstr2strlist(msgstr):
+def msgstr2list(msgstr):
     """str to list"""
     msgstr = msgstr.replace(' ', '').strip()[:]
     return [msgstr[pos*2:(pos+1)*2] for pos in range(len(msgstr)//2)]
 
-def search_msg(m_list):
+def search_msg(msg):
     """search full msg and return msg text list"""
     offset = 0
+    m_list = msgstr2list(msg)
     msg_list = []
     while offset < len(m_list) - 5:  # at least 5 byte
         if m_list[offset] == '68':
             msg_len = int(m_list[offset + 2] + m_list[offset + 1], 16)
             if offset + msg_len + 1 < len(m_list) and m_list[offset + msg_len + 1] == '16':
-                msg_list.append(m_list[offset: offset + msg_len + 2])
+                msg_list.append(''.join(m_list[offset: offset + msg_len + 2]))
                 offset += msg_len + 2
             else:
                 offset += 1
@@ -60,7 +61,7 @@ def get_reply_heart_msg(in_tm_str, SA, CA, piid):
                     % (tm_local[0], tm_local[1], tm_local[2],\
                         weekday, tm_local[3], tm_local[4], tm_local[5])
     reply_apdu_text = '81 %s %s'%(piid, '80') + in_tm_str + tm2_text + tm2_text
-    return common.add_linkLayer(msgstr2strlist(reply_apdu_text), CA, SA, C_text='01')
+    return common.add_linkLayer(msgstr2list(reply_apdu_text), CA, SA, C_text='01')
 
 
 class LoggerClass():
@@ -79,14 +80,29 @@ class LoggerClass():
     def info(self, *msg):
         """log info"""
         self.logger.info(*msg)
-    
-    def recv_tmn_msg(self, tmn_addr, msg_byte):
-        """recv tmn msg"""
-        self.logger.info('recv {addr}:{msg}'.format(addr=tmn_addr[0], msg=msgbyte2str(msg_byte)))
 
-    def send_tmn_msg(self, tmn_addr, msg_byte):
+    def recv_tmn_link_msg(self, tmn_SA, tmn_addr, msg, link_type='heart'):
+        """recv_tmn_link_msg"""
+        self.logger.info('{link_type} from tmn{SA}({t_ip}):{msg}'\
+            .format(link_type=link_type, SA=tmn_SA, t_ip=tmn_addr[0], msg=msg))
+
+    def send_to_tmn(self, tmn_SA, tmn_addr, msg, from_CA='server', from_addr=('0.0.0.0', 0)):
         """send tmn msg"""
-        self.logger.info('send {addr}:{msg}'.format(addr=tmn_addr[0], msg=msgbyte2str(msg_byte)))
+        if from_CA == 'server':
+            self.logger.info('Server -> tmn{SA}({t_ip}):{msg}'\
+                .format(SA=tmn_SA, t_ip=tmn_addr[0], msg=msg))
+        else:
+            self.logger.info('后台{CA}({m_ip}) -> 终端{SA}({t_ip}):{msg}'\
+                .format(CA=from_CA, m_ip=from_addr[0], SA=tmn_SA, t_ip=tmn_addr[0], msg=msg))
+
+    def send_to_master(self, master_CA, master_addr, msg, from_SA='server', from_addr=('0.0.0.0', 0)):
+        """send tmn msg"""
+        if from_SA == 'server':
+            self.logger.info('Server -> master{CA}({m_ip}):{msg}'\
+                .format(CA=master_CA, m_ip=master_addr[0], msg=msg))
+        else:
+            self.logger.info('终端{SA}({t_ip}) -> 后台{CA}({m_ip}):{msg}'\
+                .format(SA=from_SA, t_ip=from_addr[0], CA=master_CA, m_ip=master_addr[0], msg=msg))
 
 LOG = LoggerClass('server')
 
@@ -99,6 +115,7 @@ class Config():
             LOG.info('config file not found, create new.')
             with open(CONFIG_FILE, 'w') as _: pass
         self.config['tmnTcpServer'] = {}
+        self.config['masterTcpServer'] = {}
         self.config.read(CONFIG_FILE)
         if not self.config.has_option('tmnTcpServer', 'bind'):
             self.config['tmnTcpServer']['bind'] = '0.0.0.0'
@@ -106,6 +123,12 @@ class Config():
             self.config['tmnTcpServer']['port'] = '20083'
         if not self.config.has_option('tmnTcpServer', 'timeout_sec'):
             self.config['tmnTcpServer']['timeout_sec'] = '300'
+        if not self.config.has_option('masterTcpServer', 'bind'):
+            self.config['masterTcpServer']['bind'] = '0.0.0.0'
+        if not self.config.has_option('masterTcpServer', 'port'):
+            self.config['masterTcpServer']['port'] = '20084'
+        if not self.config.has_option('masterTcpServer', 'timeout_sec'):
+            self.config['masterTcpServer']['timeout_sec'] = '300'
         with open(CONFIG_FILE, 'w') as configfile:
             self.config.write(configfile)
 
@@ -125,6 +148,18 @@ class Config():
     def get_tmn_timeout_sec(self):
         """get tmn tmout sec"""
         return int(self.config['tmnTcpServer']['timeout_sec'])
+
+    def get_master_bind(self):
+        """get master bind"""
+        return self.config['masterTcpServer']['bind']
+
+    def get_master_port(self):
+        """get master port"""
+        return int(self.config['masterTcpServer']['port'])
+
+    def get_master_timeout_sec(self):
+        """get master tmout sec"""
+        return int(self.config['masterTcpServer']['timeout_sec'])
 
 CONFIG = Config()
 
@@ -147,8 +182,9 @@ class MsgChk():
         self.CA = ''
         self.__process(self.msg_list)
 
-    def __process(self, m_list):
+    def __process(self, msg):
         """process"""
+        m_list = msgstr2list(msg)
         offset = 1
         link_length = int(m_list[offset + 1] + m_list[offset], 16)
         if link_length != len(m_list) - 2:
@@ -214,43 +250,114 @@ class UserTable():
     """tmn and master table"""
     def __init__(self):
         self.tmn_tuple = namedtuple('tmn',
-                'tcp_handle ip port SA tmn_type login_tm in_byte out_byte msg_in msg_out')
+                'tcp_handle ip port SA login_tm in_byte out_byte msg_in msg_out')
         self.tmn_table = []
+        self.master_tuple = namedtuple('master',
+                'tcp_handle ip port CA login_tm in_byte out_byte msg_in msg_out')
+        self.master_table = []
         
-    def __get_tmn_tuple(self, tcp_handle):
-        """get pos"""
-        for tmn in self.tmn_table:
+    def __get_tmn_tuple_index(self, tcp_handle):
+        """get index"""
+        for index, tmn in enumerate(self.tmn_table):
             if tcp_handle == tmn.tcp_handle:
-                return tmn
-        return None
+                return index
+        return -1
 
-    def get_tmn_handler_list(self):
+    def get_tmn_handler_list(self, SA=''):
         """get handle list"""
-        return [x.tcp_handle for x in self.tmn_table]
-
-    def add_tmn(self, tcp_handle, ip, port, SA, tmn_type='698', login_tm=time.time()):
-        """add tmn"""
-        tmn = self.__get_tmn_tuple(tcp_handle)
-        if tmn:
-            tmn._replace(ip=ip, port=port, SA=SA, tmn_type=tmn_type)
-            if login_tm: tmn._replace(login_tm=login_tm)
+        if SA:
+            return [x.tcp_handle for x in self.tmn_table if x.SA == SA]
         else:
-            self.tmn_table.append(self.tmn_tuple(tcp_handle, ip, port, SA, tmn_type, login_tm, 0, 0, 0, 0))
+            return [x.tcp_handle for x in self.tmn_table]
+
+    def add_tmn(self, tcp_handle, ip, port, SA, login_tm=time.time()):
+        """add tmn"""
+        index = self.__get_tmn_tuple_index(tcp_handle)
+        if index >= 0:
+            self.tmn_table[index] = self.tmn_table[index]._replace(ip=ip, port=port, SA=SA, login_tm=login_tm)
+        else:
+            self.tmn_table.append(self.tmn_tuple(tcp_handle, ip, port, SA, login_tm, 0, 0, 0, 0))
 
     def del_tmn(self, tcp_handle):
         """del tmn"""
-        tmn = self.__get_tmn_tuple(tcp_handle)
-        if tmn: self.tmn_table.remove(tmn)
+        for tmn in self.tmn_table:
+            if tcp_handle == tmn.tcp_handle:
+                self.tmn_table.remove(tmn)
+                break
+
+    def set_tmn_SA(self, tcp_handle, SA=''):
+        index = self.__get_tmn_tuple_index(tcp_handle)
+        if index >= 0:
+            self.tmn_table[index] = self.tmn_table[index]._replace(SA=SA)
+
+    def update_tmn_stat(self, tcp_handle, in_byte_add=0, out_byte_add=0, msg_in_add=0, msg_out_add=0):
+        index = self.__get_tmn_tuple_index(tcp_handle)
+        if index >= 0:
+            tmn = self.tmn_table[index]
+            self.tmn_table[index] = self.tmn_table[index]._replace(in_byte=tmn.in_byte+in_byte_add,\
+                out_byte=tmn.out_byte+out_byte_add, msg_in=tmn.msg_in+msg_in_add, msg_out=tmn.msg_out+msg_out_add)
 
     def print_tmn_table(self):
         def get_tm_str(tm):
             """tm str"""
             return time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(tm))
-        fmt = '{:^15} {:^5} {:^3} {:^5} {:^21} {:^9} {:^9} {:^7} {:^7}'
-        print(fmt.format('tmn IP', 'port', 'SA', 'type', 'login time', 'in byte', 'out byte', 'in msg', 'out msg'))
+        fmt = '{:^15} {:^5} {:^20} {:^21} {:^9} {:^9} {:^7} {:^7}'
+        print(fmt.format('tmn IP', 'port', 'SA', 'login time', 'in byte', 'out byte', 'in msg', 'out msg'))
         for tmn in self.tmn_table:
-            print(fmt.format(tmn.ip, tmn.port, tmn.SA, tmn.tmn_type, get_tm_str(tmn.login_tm),\
+            print(fmt.format(tmn.ip, tmn.port, tmn.SA, get_tm_str(tmn.login_tm),\
                         tmn.in_byte, tmn.out_byte, tmn.msg_in, tmn.msg_out))
+
+
+    def __get_master_tuple_index(self, tcp_handle):
+        """get index"""
+        for index, master in enumerate(self.master_table):
+            if tcp_handle == master.tcp_handle:
+                return index
+        return -1
+
+    def get_master_handler_list(self, CA=''):
+        """get handle list"""
+        if CA and CA not in ['00']:
+            return [x.tcp_handle for x in self.master_table if x.CA == CA]
+        else:
+            return [x.tcp_handle for x in self.master_table]
+
+    def add_master(self, tcp_handle, ip, port, CA, login_tm=time.time()):
+        """add master"""
+        index = self.__get_master_tuple_index(tcp_handle)
+        if index >= 0:
+            self.master_table[index] = self.master_table[index]._replace(ip=ip, port=port, CA=CA, login_tm=login_tm)
+        else:
+            self.master_table.append(self.master_tuple(tcp_handle, ip, port, CA, login_tm, 0, 0, 0, 0))
+
+    def del_master(self, tcp_handle):
+        """del master"""
+        for master in self.master_table:
+            if tcp_handle == master.tcp_handle:
+                self.master_table.remove(master)
+                break
+
+    def set_master_CA(self, tcp_handle, CA=''):
+        index = self.__get_master_tuple_index(tcp_handle)
+        if index >= 0:
+            self.master_table[index] = self.master_table[index]._replace(CA=CA)
+
+    def update_master_stat(self, tcp_handle, in_byte_add=0, out_byte_add=0, msg_in_add=0, msg_out_add=0):
+        index = self.__get_master_tuple_index(tcp_handle)
+        if index >= 0:
+            master = self.master_table[index]
+            self.master_table[index] = self.master_table[index]._replace(in_byte=master.in_byte+in_byte_add,\
+                out_byte=master.out_byte+out_byte_add, msg_in=master.msg_in+msg_in_add, msg_out=master.msg_out+msg_out_add)
+
+    def print_master_table(self):
+        def get_tm_str(tm):
+            """tm str"""
+            return time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(tm))
+        fmt = '{:^15} {:^5} {:^20} {:^21} {:^9} {:^9} {:^7} {:^7}'
+        print(fmt.format('master IP', 'port', 'CA', 'login time', 'in byte', 'out byte', 'in msg', 'out msg'))
+        for master in self.master_table:
+            print(fmt.format(master.ip, master.port, master.CA, get_tm_str(master.login_tm),\
+                        master.in_byte, master.out_byte, master.msg_in, master.msg_out))
 
 USER_TABLE = UserTable()
 
@@ -260,31 +367,46 @@ class TmnHandler(asyncore.dispatcher_with_send):
     def __init__(self, *args, **kw):
         asyncore.dispatcher_with_send.__init__(self, *args, **kw)
         self.last_active_tm = time.time()
+        self.SA = ''
 
     def handle_read(self):
         data = self.recv(8192)
         if data:
-            msg_list = search_msg(msgbyte2strlist(data))
+            msg_list = search_msg(msgbyte2str(data))
             for msg in msg_list:
-                LOG.recv_tmn_msg(self.addr, data)
                 msg_chk = MsgChk(msg)
                 if msg_chk.is_login or msg_chk.is_heart:
+                    self.SA = msg_chk.SA
+                    USER_TABLE.set_tmn_SA(self, msg_chk.SA)
+                    LOG.recv_tmn_link_msg(msg_chk.SA, self.addr, msg, 'login' if msg_chk.is_login else 'heart')
                     reply_msg = get_reply_heart_msg(msg_chk.heart_tm_str, msg_chk.SA, msg_chk.CA, msg_chk.piid)
                     reply_byte = msgstr2byte(reply_msg)
                     self.send(reply_byte)
-                    LOG.send_tmn_msg(self.addr, reply_byte)
+                    LOG.send_to_tmn(msg_chk.SA, self.addr, reply_msg)
+                else:
+                    send_list = USER_TABLE.get_master_handler_list(CA=msg_chk.CA)
+                    if send_list:
+                        for master_handle in send_list:
+                            master_handle.send_msg(msg, self.SA, self.addr)
+                    else:
+                        LOG.send_to_master(msg_chk.CA, ('0.0.0.0', 0), msg, self.SA, self.addr)
             self.last_active_tm = time.time()
         else:
             self.handle_close()
 
     def handle_close(self):
-        LOG.info('{client} quit'.format(client=str(self.addr)))
+        LOG.info('tmn({ip}:{port}) quit'.format(ip=self.addr[0], port=self.addr[1]))
         self.close()
         USER_TABLE.del_tmn(self)
 
+    def send_msg(self, msg, from_CA, from_addr):
+        """send msg to tmn"""
+        self.send(msgstr2byte(msg))
+        LOG.send_to_tmn(self.SA, self.addr, msg, from_CA, from_addr)
+
     def kill(self):
         """kill"""
-        LOG.info('{client} timeout, close it.'.format(client=str(self.addr)))
+        LOG.info('tmn({ip}:{port}) timeout, close it'.format(ip=self.addr[0], port=self.addr[1]))
         self.close()
         USER_TABLE.del_tmn(self)
 
@@ -303,9 +425,75 @@ class TmnTcpServer(asyncore.dispatcher):
         self.listen(5)
 
     def handle_accepted(self, sock, addr):
-        LOG.info('terminal[{ip}:{port}] connected'.format(ip=addr[0], port=addr[1]))
+        LOG.info('tmn({ip}:{port}) connected'.format(ip=addr[0], port=addr[1]))
         handler = TmnHandler(sock)
-        USER_TABLE.add_tmn(handler, addr[0], addr[1], '0')
+        USER_TABLE.add_tmn(handler, addr[0], addr[1], '')
+
+    def show_status(self):
+        """show status"""
+        for no, thread in self._map.items():
+            print('{no}|{thread}'.format(no=no, thread=thread))
+
+
+class MasterHandler(asyncore.dispatcher_with_send):
+    """master tcp handle"""
+    def __init__(self, *args, **kw):
+        asyncore.dispatcher_with_send.__init__(self, *args, **kw)
+        self.last_active_tm = time.time()
+        self.CA = ''
+
+    def handle_read(self):
+        data = self.recv(8192)
+        if data:
+            msg_list = search_msg(msgbyte2str(data))
+            for msg in msg_list:
+                msg_chk = MsgChk(msg)
+                self.CA = msg_chk.CA
+                USER_TABLE.set_master_CA(self, msg_chk.CA)
+                send_list = USER_TABLE.get_tmn_handler_list(SA='' if msg_chk.is_broadcast else msg_chk.SA)
+                if send_list:
+                    for tmn_handle in send_list:
+                        tmn_handle.send_msg(msg, self.CA, self.addr)
+                else:
+                    LOG.send_to_tmn(msg_chk.SA, ('0.0.0.0', 0), msg, self.CA, self.addr)
+            self.last_active_tm = time.time()
+        else:
+            self.handle_close()
+
+    def handle_close(self):
+        LOG.info('master({ip}:{port}) quit'.format(ip=self.addr[0], port=self.addr[1]))
+        self.close()
+        USER_TABLE.del_master(self)
+
+    def send_msg(self, msg, from_SA, from_addr):
+        """send msg to master"""
+        self.send(msgstr2byte(msg))
+        LOG.send_to_master(self.CA, self.addr, msg, from_SA, from_addr)
+
+    def kill(self):
+        """kill"""
+        LOG.info('master({ip}:{port}) timeout, close it.'.format(ip=self.addr[0], port=self.addr[1]))
+        self.close()
+        USER_TABLE.del_master(self)
+
+    def is_alive(self):
+        """chk client alive"""
+        return True if time.time() - self.last_active_tm < CONFIG.get_master_timeout_sec() else False
+
+
+class MasterTcpServer(asyncore.dispatcher):
+    """tcp server"""
+    def __init__(self, host, port):
+        asyncore.dispatcher.__init__(self)
+        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.set_reuse_addr()
+        self.bind((host, port))
+        self.listen(5)
+
+    def handle_accepted(self, sock, addr):
+        LOG.info('master({ip}:{port}) connected'.format(ip=addr[0], port=addr[1]))
+        handler = MasterHandler(sock)
+        USER_TABLE.add_master(handler, addr[0], addr[1], '')
 
     def show_status(self):
         """show status"""
@@ -337,9 +525,10 @@ if __name__ == '__main__':
     LOG.info('#      Designed by Kay       #')
     LOG.info('#'*30)
     tmn_tcp_server = TmnTcpServer(CONFIG.get_tmn_bind(), CONFIG.get_tmn_port())
-    tmn_tcp_thread = threading.Thread(name='tcp server', target=tcp_server_run)
+    master_tcp_server = MasterTcpServer(CONFIG.get_master_bind(), CONFIG.get_master_port())
+    tcp_server_thread = threading.Thread(name='tcp server', target=tcp_server_run)
     collection_thread = threading.Thread(name='collection', target=dead_client_kill)
-    tmn_tcp_thread.start()
+    tcp_server_thread.start()
     collection_thread.start()
     LOG.info('tmn TCP server start. bind {bind}, port {port}, timeout {timeout}s'\
             .format(bind=CONFIG.get_tmn_bind(), port=CONFIG.get_tmn_port(), timeout=CONFIG.get_tmn_timeout_sec()))
@@ -349,12 +538,18 @@ if __name__ == '__main__':
             continue
 
         if command in ['i']:
-            tmn_tcp_server.show_status()
+            print('*'*16, '终端列表', '*'*16)
             USER_TABLE.print_tmn_table()
+            print('')
+            print('*'*16, '后台列表', '*'*16)
+            USER_TABLE.print_master_table()
+        elif command in ['ii']:
+            tmn_tcp_server.show_status()
         elif command in ['t']:
             print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         elif command in ['q']:
             tmn_tcp_server.close()
+            master_tcp_server.close()
             asyncore.close_all()
             LOG.info('Server Quit.')
             os._exit(0)
