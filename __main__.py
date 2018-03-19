@@ -292,12 +292,12 @@ class UserTable():
         if index >= 0:
             self.tmn_table[index] = self.tmn_table[index]._replace(SA=SA)
 
-    def update_tmn_stat(self, tcp_handle, in_byte_add=0, out_byte_add=0, msg_in_add=0, msg_out_add=0):
+    def update_tmn_stat(self, tcp_handle, in_byte_add=0, out_byte_add=0, in_msg_add=0, out_msg_add=0):
         index = self.__get_tmn_tuple_index(tcp_handle)
         if index >= 0:
             tmn = self.tmn_table[index]
             self.tmn_table[index] = self.tmn_table[index]._replace(in_byte=tmn.in_byte+in_byte_add,\
-                out_byte=tmn.out_byte+out_byte_add, msg_in=tmn.msg_in+msg_in_add, msg_out=tmn.msg_out+msg_out_add)
+                out_byte=tmn.out_byte+out_byte_add, msg_in=tmn.msg_in+in_msg_add, msg_out=tmn.msg_out+out_msg_add)
 
     def print_tmn_table(self):
         def get_tm_str(tm):
@@ -346,12 +346,12 @@ class UserTable():
         if index >= 0:
             self.master_table[index] = self.master_table[index]._replace(CA=CA)
 
-    def update_master_stat(self, tcp_handle, in_byte_add=0, out_byte_add=0, msg_in_add=0, msg_out_add=0):
+    def update_master_stat(self, tcp_handle, in_byte_add=0, out_byte_add=0, in_msg_add=0, out_msg_add=0):
         index = self.__get_master_tuple_index(tcp_handle)
         if index >= 0:
             master = self.master_table[index]
             self.master_table[index] = self.master_table[index]._replace(in_byte=master.in_byte+in_byte_add,\
-                out_byte=master.out_byte+out_byte_add, msg_in=master.msg_in+msg_in_add, msg_out=master.msg_out+msg_out_add)
+                out_byte=master.out_byte+out_byte_add, msg_in=master.msg_in+in_msg_add, msg_out=master.msg_out+out_msg_add)
 
     def print_master_table(self):
         def get_tm_str(tm):
@@ -377,6 +377,8 @@ class TmnHandler(asyncore.dispatcher_with_send):
         data = self.recv(8192)
         if data:
             msg_list = search_msg(msgbyte2str(data))
+            USER_TABLE.update_tmn_stat(self, out_byte_add=len(data))
+            USER_TABLE.update_tmn_stat(self, out_msg_add=len(msg_list))
             for msg in msg_list:
                 msg_chk = MsgChk(msg)
                 if msg_chk.is_login or msg_chk.is_heart:
@@ -387,13 +389,15 @@ class TmnHandler(asyncore.dispatcher_with_send):
                     reply_byte = msgstr2byte(reply_msg)
                     self.send(reply_byte)
                     LOG.send_to_tmn(msg_chk.SA, self.addr, reply_msg)
+                    USER_TABLE.update_tmn_stat(self, in_byte_add=len(reply_byte))
+                    USER_TABLE.update_tmn_stat(self, in_msg_add=1)
                 else:
                     send_list = USER_TABLE.get_master_handler_list(CA=msg_chk.CA)
                     if send_list:
                         for master_handle in send_list:
                             master_handle.send_msg(msg, self.SA, self.addr)
                     else:
-                        LOG.send_to_master(msg_chk.CA, ('0.0.0.0', 0), msg, self.SA, self.addr)
+                        LOG.send_to_master(msg_chk.CA, ('None', 0), msg, self.SA, self.addr)
             self.last_active_tm = time.time()
         else:
             self.handle_close()
@@ -407,6 +411,8 @@ class TmnHandler(asyncore.dispatcher_with_send):
         """send msg to tmn"""
         self.send(msgstr2byte(msg))
         LOG.send_to_tmn(self.SA, self.addr, msg, from_CA, from_addr)
+        USER_TABLE.update_tmn_stat(self, in_byte_add=len(msgstr2byte(msg)))
+        USER_TABLE.update_tmn_stat(self, in_msg_add=1)
 
     def kill(self):
         """kill"""
@@ -450,6 +456,8 @@ class MasterHandler(asyncore.dispatcher_with_send):
         data = self.recv(8192)
         if data:
             msg_list = search_msg(msgbyte2str(data))
+            USER_TABLE.update_master_stat(self, out_byte_add=len(data))
+            USER_TABLE.update_master_stat(self, out_msg_add=len(msg_list))
             for msg in msg_list:
                 msg_chk = MsgChk(msg)
                 send_list = USER_TABLE.get_tmn_handler_list(SA='' if msg_chk.is_broadcast else msg_chk.SA)
@@ -459,7 +467,7 @@ class MasterHandler(asyncore.dispatcher_with_send):
                     for tmn_handle in send_list:
                         tmn_handle.send_msg(msg, self.CA, self.addr)
                 else:
-                    LOG.send_to_tmn(msg_chk.SA, ('0.0.0.0', 0), msg, self.CA, self.addr)
+                    LOG.send_to_tmn(msg_chk.SA, ('None', 0), msg, self.CA, self.addr)
             self.last_active_tm = time.time()
         else:
             self.handle_close()
@@ -473,6 +481,8 @@ class MasterHandler(asyncore.dispatcher_with_send):
         """send msg to master"""
         self.send(msgstr2byte(msg))
         LOG.send_to_master(self.CA, self.addr, msg, from_SA, from_addr)
+        USER_TABLE.update_master_stat(self, in_byte_add=len(msgstr2byte(msg)))
+        USER_TABLE.update_master_stat(self, in_msg_add=1)
 
     def kill(self):
         """kill"""
@@ -544,10 +554,10 @@ if __name__ == '__main__':
             continue
 
         if command in ['i']:
-            print('*'*16, '终端列表', '*'*16)
+            print('*'*16, 'Terminal list', '*'*16)
             USER_TABLE.print_tmn_table()
             print('')
-            print('*'*16, '后台列表', '*'*16)
+            print('*'*16, 'Master list', '*'*16)
             USER_TABLE.print_master_table()
         elif command in ['ii']:
             tmn_tcp_server.show_status()
