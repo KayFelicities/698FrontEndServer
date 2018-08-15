@@ -372,11 +372,16 @@ class TmnHandler(asyncore.dispatcher_with_send):
         asyncore.dispatcher_with_send.__init__(self, *args, **kw)
         self.last_active_tm = time.time()
         self.SA = ''
+        self.msg = b''
 
     def handle_read(self):
         data = self.recv(8192)
+        self.msg += data
         if data:
-            msg_list = search_msg(msgbyte2str(data))
+            msg_list = search_msg(msgbyte2str(self.msg))
+            if not msg_list and self.msg[0] == b'\x68':
+                return
+            self.msg = b''
             USER_TABLE.update_tmn_stat(self, out_byte_add=len(data))
             USER_TABLE.update_tmn_stat(self, out_msg_add=len(msg_list))
             for msg in msg_list:
@@ -451,11 +456,16 @@ class MasterHandler(asyncore.dispatcher_with_send):
         asyncore.dispatcher_with_send.__init__(self, *args, **kw)
         self.last_active_tm = time.time()
         self.CA = ''
+        self.msg = b''
 
     def handle_read(self):
         data = self.recv(8192)
+        self.msg += data
         if data:
-            msg_list = search_msg(msgbyte2str(data))
+            msg_list = search_msg(msgbyte2str(self.msg))
+            if not msg_list and self.msg[0] == b'\x68':
+                return
+            self.msg = b''
             USER_TABLE.update_master_stat(self, out_byte_add=len(data))
             USER_TABLE.update_master_stat(self, out_msg_add=len(msg_list))
             for msg in msg_list:
