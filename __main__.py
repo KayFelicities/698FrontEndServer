@@ -18,6 +18,8 @@ SOFTWARE_PATH = os.path.split(os.path.realpath(__file__))[0]
 CONFIG_FILE = os.path.join(SOFTWARE_PATH, '698FrontEnd.ini')
 LOG_FILE = os.path.join(SOFTWARE_PATH, '698FrontEnd.log')
 
+Is_reply_heart = True
+
 def msgbyte2str(byte, sep=''):
     """byte to str"""
     return sep.join(['%02X' % b for b in byte])
@@ -387,6 +389,8 @@ class TmnHandler(asyncore.dispatcher_with_send):
             for msg in msg_list:
                 msg_chk = MsgChk(msg)
                 if msg_chk.is_login or msg_chk.is_heart:
+                    if not Is_reply_heart:
+                        continue
                     self.SA = msg_chk.SA
                     USER_TABLE.set_tmn_SA(self, msg_chk.SA)
                     LOG.recv_tmn_link_msg(msg_chk.SA, self.addr, msg, 'login' if msg_chk.is_login else 'heart')
@@ -573,6 +577,9 @@ if __name__ == '__main__':
             tmn_tcp_server.show_status()
         elif command in ['t']:
             print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+        elif command in ['r']:
+            Is_reply_heart = not Is_reply_heart
+            print('replay longin/heart: ', Is_reply_heart)
         elif command in ['q']:
             tmn_tcp_server.close()
             master_tcp_server.close()
