@@ -3,6 +3,7 @@ import logging
 import binascii
 import pathlib
 import sys
+import time
 
 logging.basicConfig(level=logging.INFO, 
                     format='[%(asctime)s %(levelname)s]%(message)s',
@@ -42,6 +43,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                 logging.info(f'recv login: {msg.msg_str}')
                 re_msg = Msg('986500FFFF80FF41011001080602000000010004C81EA8C0044E0AA8C0264E0AA8C0BE1307E20B0C0E172304740AA8C0fcb932006830000105010000000000D1561E81008007E30313020F3A1502D007E30313020F3815000007E30313020F38150000E25C168e0b16')
                 self.request.sendall(re_msg.msg_bytes)
+                time.sleep(.1)
                 get_info_msg = Msg('98 33 00 FF FF 80 FF 42 01 10 01 08 06 02 00 00 00 01 00 04 C8 1E A8 C0 04 4E 0A A8 C0 26 4E 0A A8 C0 BE 13 07 E2 0B 0C 0E 17 23 04 74 0A A8 C0 37 C9 00 00 DE FC 16')
                 self.request.sendall(get_info_msg.msg_bytes)
             else:
