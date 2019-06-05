@@ -39,7 +39,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             if not self.data:
                 break
             msg = Msg(self.data)
-            if msg.msg_list[7] == 'C1': # login & heartbeat
+            if msg.msg_list[7] in ['C1', 'D1']: # login & heartbeat
                 logging.info(f'recv login or heartbeat: {msg.msg_str}')
                 re_msg = Msg('986500FFFF80FF41011001080602000000010004C81EA8C0044E0AA8C0264E0AA8C0BE1307E20B0C0E172304740AA8C0fcb932006830000105010000000000D1561E81008007E30313020F3A1502D007E30313020F3815000007E30313020F38150000E25C168e0b16')
                 logging.info(f'replay:{re_msg.msg_str}')
