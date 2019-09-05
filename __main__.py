@@ -14,7 +14,8 @@ import common
 VERSION = 'v0.0'
 DATE = '2018.03.09'
 RE_MSG = '682E0001030000372310D21D81008007E2030602082E19003C07E2030602082E1A000007E2030602082E1A0000801E16'
-SOFTWARE_PATH = os.path.split(os.path.realpath(__file__))[0]
+# SOFTWARE_PATH = os.path.split(os.path.realpath(__file__))[0]
+SOFTWARE_PATH = os.getcwd()
 CONFIG_FILE = os.path.join(SOFTWARE_PATH, '698FrontEnd.ini')
 LOG_FILE = os.path.join(SOFTWARE_PATH, '698FrontEnd.log')
 
